@@ -1,29 +1,21 @@
-# Use official Python image (match your Python version)
 FROM python:3.11-slim
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-
-# Create and set working directory
-WORKDIR /app
-
-# Install system dependencies (required for Pillow and SSL)
+# Install system dependencies
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
     libjpeg-dev \
-    zlib1g-dev \
-    libssl-dev && \
+    zlib1g-dev && \
     rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first (for better caching)
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
+WORKDIR /app
 COPY . .
 
-# Set the command to run your application
-CMD ["python", "drug2.py"]
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Health check (required by Koyeb)
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD curl -f http://localhost:8000/ || exit 1
+
+# Explicit command (critical for Koyeb)
+ENTRYPOINT ["python"]
+CMD ["drug2.py"]
