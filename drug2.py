@@ -1,90 +1,126 @@
 import os
+import time
 import telebot
-from PIL import Image
+from PIL import Image, ImageEnhance
 import google.generativeai as genai
+from requests.exceptions import ConnectionError, ReadTimeout
 
-# Configure your API keys
+# Configure API keys
 TELEGRAM_BOT_TOKEN = '7322174132:AAF2xMjQxZ5P90BnTvR7PODP1H02uXQwCP0'
 GOOGLE_API_KEY = 'AIzaSyAf6pEnDG9xuJRyaSjbNzetmG2Qn2q2uYE'
 
 # Initialize Telegram Bot
-bot = telebot.TeleBot(TELEGRAM_BOT_TOKEN)
+bot = telebot.TeleBot(
+    TELEGRAM_BOT_TOKEN,
+    threaded=False,
+    num_threads=1,
+    skip_pending=True
+)
 
 # Configure Google Generative AI
 genai.configure(api_key=GOOGLE_API_KEY)
+model = genai.GenerativeModel(
+    'gemini-1.5-flash',
+    generation_config={
+        'temperature': 0.3,
+        'max_output_tokens': 1000
+    }
+)
 
-# Initialize the generative model (using current recommended model)
-model = genai.GenerativeModel('gemini-1.5-flash')
+def enhance_image_quality(img):
+    """Improve image quality for better text recognition"""
+    try:
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.5)
+        return img
+    except Exception:
+        return img
 
 def analyze_medicine_image(image):
-    """
-    Analyze the medicine packaging image and generate a description
-    """
+    """Medicine analysis with essential scientific information"""
     try:
-        # Prompt for medicine identification and description
         prompt = """
-        Identify the medicine from this packaging. 
-        Provide the following details in Kurdish Sorani:
-        1. Name of the medicine
-        2. Primary medical use
-        3. Brief description of what condition it treats
+        لە کوردی سۆرانیدا تەنیا ئەم زانیارییانە بڵێ:
         
-        Respond only in Kurdish Sorani language.
-        If you cannot identify the medicine, say: 
-        "ناتوانم دەرمانەکە ناسایەوە. تکایە وێنەیەکی باشتر و ڕوونتر بنێرە."
+        1. ناوی زانستی دەرمان: [ناوی زانستی]
+        2. ناوی بازرگانی: [ناوی بازرگانی]
+        
+        3. بەکارهێنان:
+        - [بۆ کامی نەخۆشی/ئازار بەکاردێت]
+        
+        4. سوودەکان:
+        - [سودی سەرەکی]
+        
+        5. زیانەکان:
+        - [کاریگەرییە نەخوازراوە سەرەکییەکان]
+
+        ئەگەر ناتوانیت دەرمانەکە بشناسیتەوە:
+        "نەتوانم دەرمانەکە بشناسمەوە. تکایە وێنەیەکی ڕوونتر بنێرە"
         """
         
-        # Generate response
-        response = model.generate_content([prompt, image])
+        enhanced_img = enhance_image_quality(image)
+        response = model.generate_content([prompt, enhanced_img])
         return response.text
     
     except Exception as e:
-        return f"هەڵە ڕووی دا: {str(e)}"
+        return f"هەڵەیەک ڕوویدا: {str(e)}"
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = """
-    بەخێربێیت! 👋
-    
-    تکایە وێنەی پاکێتی دەرمانێک بنێرە، 
-    منیش پێت دەڵێم بۆ چی بەکاردەهێنرێت.
-    
-    Please send me an image of a medicine packaging,
-    and I'll tell you what it's used for in Kurdish Sorani.
-    """
+    بەخێربێیت بۆ بۆتی زانیاری دەرمانی 🔬
+
+تکایە وێنەی پاکەتی دەرمانێک بنێرە بۆ بینینی:
+- ناوی زانستی و بازرگانی
+- بۆ چ بەکاردێت
+- سوود و زیانەکانی
+"""
     bot.reply_to(message, welcome_text)
 
 @bot.message_handler(content_types=['photo'])
 def handle_medicine_photo(message):
     temp_image_path = 'medicine_image.jpg'
     try:
-        # Download the photo
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Save the file temporarily
-        with open(temp_image_path, 'wb') as new_file:
-            new_file.write(downloaded_file)
+        with open(temp_image_path, 'wb') as f:
+            f.write(downloaded_file)
         
-        # Open and process the image
         with Image.open(temp_image_path) as img:
-            # Analyze the image
             description = analyze_medicine_image(img)
-            
-            # Reply with the description
-            bot.reply_to(message, description)
+            response = f"""
+🔬 زانیاری دەرمان:
+
+{description}
+
+⚠️ ئامۆژگاری: هەمیشە پێش بەکارهێنان ڕاوێژ لە پزیشک بکە.
+"""
+            bot.reply_to(message, response)
     
     except Exception as e:
-        bot.reply_to(message, f"هەڵەیەک ڕووی دا: {str(e)}")
+        bot.reply_to(message, f"هەڵە: {str(e)[:200]}")
     
     finally:
-        # Clean up the temporary file if it exists
         if os.path.exists(temp_image_path):
-            try:
-                os.remove(temp_image_path)
-            except:
-                pass  # Skip if file is already removed or locked
+            try: os.remove(temp_image_path)
+            except: pass
 
-# Start the bot
-print("Bot is running...")
-bot.polling()
+def run_bot():
+    """Run bot with auto-recovery"""
+    while True:
+        try:
+            print("Bot is running...")
+            bot.polling(none_stop=True, timeout=30)
+        except (ConnectionError, ReadTimeout) as e:
+            print(f"Connection error: {e}. Retrying in 10s...")
+            time.sleep(10)
+        except Exception as e:
+            print(f"Error: {e}. Restarting in 30s...")
+            time.sleep(30)
+
+if __name__ == '__main__':
+    print("Starting medicine information bot...")
+    run_bot()
