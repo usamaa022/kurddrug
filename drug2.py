@@ -92,9 +92,13 @@ def send_welcome(message):
 def handle_medicine_photo(message):
     temp_image_path = 'medicine_image.jpg'
     try:
+        # Get file info
         file_info = bot.get_file(message.photo[-1].file_id)
-        downloaded_file = bot.download_file(file_info.file_path, timeout=15)
         
+        # Download file (removed timeout parameter)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # Save and process image
         with open(temp_image_path, 'wb') as f:
             f.write(downloaded_file)
         
@@ -107,8 +111,10 @@ def handle_medicine_photo(message):
     
     finally:
         if os.path.exists(temp_image_path):
-            try: os.remove(temp_image_path)
-            except: pass
+            try: 
+                os.remove(temp_image_path)
+            except: 
+                pass
 
 def run_bot():
     """Run bot with auto-recovery"""
