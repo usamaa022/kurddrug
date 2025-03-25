@@ -1,13 +1,16 @@
 import os
 import time
+import threading
 import telebot
 from PIL import Image, ImageEnhance
 import google.generativeai as genai
 from requests.exceptions import ConnectionError, ReadTimeout
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 # Configure API keys
-TELEGRAM_BOT_TOKEN = '7322174132:AAF2xMjQxZ5P90BnTvR7PODP1H02uXQwCP0'
-GOOGLE_API_KEY = 'AIzaSyAf6pEnDG9xuJRyaSjbNzetmG2Qn2q2uYE'
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '7322174132:AAF2xMjQxZ5P90BnTvR7PODP1H02uXQwCP0')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'AIzaSyAf6pEnDG9xuJRyaSjbNzetmG2Qn2q2uYE')
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(
@@ -17,17 +20,30 @@ bot = telebot.TeleBot(
     skip_pending=True
 )
 
-# Configure Google Generative AI with medical knowledge
+# Configure Google Generative AI
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel(
-    'gemini-1.5-pro',
+    'gemini-1.5-flash',
     generation_config={
         'temperature': 0.4,
-        'top_p': 0.95,
         'max_output_tokens': 2000
-    },
-    system_instruction="You are a pharmaceutical expert with deep knowledge of medicine composition and effects."
+    }
 )
+
+class HealthCheckServer(ThreadingMixIn, HTTPServer):
+    """HTTP Server for health checks"""
+    daemon_threads = True
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def start_health_server():
+    """Start health check server in background"""
+    server = HealthCheckServer(('0.0.0.0', 8000), HealthHandler)
+    server.serve_forever()
 
 def enhance_image_quality(img):
     """Improve image quality for drug name recognition"""
@@ -41,31 +57,16 @@ def enhance_image_quality(img):
         return img
 
 def analyze_medicine(image):
-    """Comprehensive drug analysis using packaging and medical knowledge"""
+    """Comprehensive drug analysis"""
     try:
         prompt = """
-        Analyze this medicine packaging and provide detailed scientific information in Kurdish Sorani:
-
-        1. ناوی زانستی: [Scientific name + chemical composition]
-           - پێکهاتە: [Active ingredients + inactive components]
-           - جۆری دەرمان: [Tablet/Capsule/Injection etc.]
-
-        2. ناوی بازرگانی: [Brand names in Kurdistan region if available]
-
-        3. کاریگەرییە باشەکان:
-           - [3-5 main therapeutic effects]
-           - [Mechanism of action in simple terms]
-
-        4. کاریگەرییە نەخوازراوەکان:
-           - [3-5 common side effects]
-           - [Rare but serious risks]
-
-        5. زانیارییە تایبەتەکان:
-           - [Half-life and metabolism]
-           - [Drug interactions to watch for]
-
-        Provide complete information even if not all details are visible on packaging.
-        Use your pharmaceutical knowledge to supplement missing information.
+        Provide detailed drug information in Kurdish Sorani including:
+        1. Scientific name and composition
+        2. Therapeutic effects
+        3. Side effects
+        4. Mechanism of action
+        
+        If packaging is unclear, use your pharmaceutical knowledge.
         """
         
         enhanced_img = enhance_image_quality(image)
@@ -80,13 +81,8 @@ def send_welcome(message):
     welcome_text = """
     بەخێربێیت بۆ بۆتی زانستی دەرمانی 🔬💊
 
-من دەتوانم ئەم زانیاریانەت پێبڵێم لەسەر هەر دەرمانێک:
-- ناوی زانستی و پێکهاتەکەی
-- کاریگەرییە باشەکان
-- کاریگەرییە نەخوازراوەکان
-- زانیارییە تایبەتەکان
-
-تکایە وێنەی پاکەتەکە بنێرە یان ناوی دەرمانەکە بنووسە.
+من دەتوانم زانیاری زانستیت پێبڵێم لەسەر دەرمانەکان.
+تکایە وێنەی پاکەتەکە بنێرە.
 """
     bot.reply_to(message, welcome_text)
 
@@ -102,14 +98,7 @@ def handle_medicine_photo(message):
         
         with Image.open(temp_image_path) as img:
             analysis = analyze_medicine(img)
-            response = f"""
-🧪 زانیاری زانستی دەرمان:
-
-{analysis}
-
-⚠️ ئامۆژگاری: هەمیشە پێش بەکارهێنان ڕاوێژ لە پزیشک یان ئەندازیاری دەرمانسازی بکە.
-"""
-            bot.reply_to(message, response)
+            bot.reply_to(message, f"🧪 زانیاری:\n\n{analysis}")
     
     except Exception as e:
         bot.reply_to(message, f"هەڵە: {str(e)[:200]}")
@@ -118,22 +107,6 @@ def handle_medicine_photo(message):
         if os.path.exists(temp_image_path):
             try: os.remove(temp_image_path)
             except: pass
-
-@bot.message_handler(func=lambda message: True)
-def handle_text(message):
-    try:
-        response = model.generate_content(f"""
-        Provide detailed scientific information in Kurdish Sorani about: {message.text}
-
-        Include:
-        1. Scientific name and composition
-        2. Therapeutic effects
-        3. Side effects
-        4. Special pharmacological properties
-        """)
-        bot.reply_to(message, f"🔍 زانیاری:\n\n{response.text}")
-    except Exception as e:
-        bot.reply_to(message, f"هەڵە: نەتوانم زانیاری بدۆزمەوە. تکایە ناوەکە ڕاست بنووسە.")
 
 def run_bot():
     """Run bot with auto-recovery"""
@@ -149,5 +122,9 @@ def run_bot():
             time.sleep(30)
 
 if __name__ == '__main__':
-    print("Starting advanced medicine bot...")
+    # Start health check server in background
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    
+    print("Starting medicine bot with health checks...")
     run_bot()
