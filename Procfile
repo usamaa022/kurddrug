@@ -1,0 +1,1 @@
+worker: python drug2.py
