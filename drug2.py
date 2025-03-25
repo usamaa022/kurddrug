@@ -17,47 +17,55 @@ bot = telebot.TeleBot(
     skip_pending=True
 )
 
-# Configure Google Generative AI
+# Configure Google Generative AI with medical knowledge
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel(
-    'gemini-1.5-flash',
+    'gemini-1.5-pro',
     generation_config={
-        'temperature': 0.3,
-        'max_output_tokens': 1000
-    }
+        'temperature': 0.4,
+        'top_p': 0.95,
+        'max_output_tokens': 2000
+    },
+    system_instruction="You are a pharmaceutical expert with deep knowledge of medicine composition and effects."
 )
 
 def enhance_image_quality(img):
-    """Improve image quality for better text recognition"""
+    """Improve image quality for drug name recognition"""
     try:
         if img.mode != 'RGB':
             img = img.convert('RGB')
         enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(1.5)
+        img = enhancer.enhance(1.8)
         return img
     except Exception:
         return img
 
-def analyze_medicine_image(image):
-    """Medicine analysis with essential scientific information"""
+def analyze_medicine(image):
+    """Comprehensive drug analysis using packaging and medical knowledge"""
     try:
         prompt = """
-        لە کوردی سۆرانیدا تەنیا ئەم زانیارییانە بڵێ:
-        
-        1. ناوی زانستی دەرمان: [ناوی زانستی]
-        2. ناوی بازرگانی: [ناوی بازرگانی]
-        
-        3. بەکارهێنان:
-        - [بۆ کامی نەخۆشی/ئازار بەکاردێت]
-        
-        4. سوودەکان:
-        - [سودی سەرەکی]
-        
-        5. زیانەکان:
-        - [کاریگەرییە نەخوازراوە سەرەکییەکان]
+        Analyze this medicine packaging and provide detailed scientific information in Kurdish Sorani:
 
-        ئەگەر ناتوانیت دەرمانەکە بشناسیتەوە:
-        "نەتوانم دەرمانەکە بشناسمەوە. تکایە وێنەیەکی ڕوونتر بنێرە"
+        1. ناوی زانستی: [Scientific name + chemical composition]
+           - پێکهاتە: [Active ingredients + inactive components]
+           - جۆری دەرمان: [Tablet/Capsule/Injection etc.]
+
+        2. ناوی بازرگانی: [Brand names in Kurdistan region if available]
+
+        3. کاریگەرییە باشەکان:
+           - [3-5 main therapeutic effects]
+           - [Mechanism of action in simple terms]
+
+        4. کاریگەرییە نەخوازراوەکان:
+           - [3-5 common side effects]
+           - [Rare but serious risks]
+
+        5. زانیارییە تایبەتەکان:
+           - [Half-life and metabolism]
+           - [Drug interactions to watch for]
+
+        Provide complete information even if not all details are visible on packaging.
+        Use your pharmaceutical knowledge to supplement missing information.
         """
         
         enhanced_img = enhance_image_quality(image)
@@ -65,17 +73,20 @@ def analyze_medicine_image(image):
         return response.text
     
     except Exception as e:
-        return f"هەڵەیەک ڕوویدا: {str(e)}"
+        return f"هەڵە: نەتوانم زانیاری بدۆزمەوە. تکایە دووبارەی بکەرەوە.\nError: {str(e)}"
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = """
-    بەخێربێیت بۆ بۆتی زانیاری دەرمانی 🔬
+    بەخێربێیت بۆ بۆتی زانستی دەرمانی 🔬💊
 
-تکایە وێنەی پاکەتی دەرمانێک بنێرە بۆ بینینی:
-- ناوی زانستی و بازرگانی
-- بۆ چ بەکاردێت
-- سوود و زیانەکانی
+من دەتوانم ئەم زانیاریانەت پێبڵێم لەسەر هەر دەرمانێک:
+- ناوی زانستی و پێکهاتەکەی
+- کاریگەرییە باشەکان
+- کاریگەرییە نەخوازراوەکان
+- زانیارییە تایبەتەکان
+
+تکایە وێنەی پاکەتەکە بنێرە یان ناوی دەرمانەکە بنووسە.
 """
     bot.reply_to(message, welcome_text)
 
@@ -90,13 +101,13 @@ def handle_medicine_photo(message):
             f.write(downloaded_file)
         
         with Image.open(temp_image_path) as img:
-            description = analyze_medicine_image(img)
+            analysis = analyze_medicine(img)
             response = f"""
-🔬 زانیاری دەرمان:
+🧪 زانیاری زانستی دەرمان:
 
-{description}
+{analysis}
 
-⚠️ ئامۆژگاری: هەمیشە پێش بەکارهێنان ڕاوێژ لە پزیشک بکە.
+⚠️ ئامۆژگاری: هەمیشە پێش بەکارهێنان ڕاوێژ لە پزیشک یان ئەندازیاری دەرمانسازی بکە.
 """
             bot.reply_to(message, response)
     
@@ -107,6 +118,22 @@ def handle_medicine_photo(message):
         if os.path.exists(temp_image_path):
             try: os.remove(temp_image_path)
             except: pass
+
+@bot.message_handler(func=lambda message: True)
+def handle_text(message):
+    try:
+        response = model.generate_content(f"""
+        Provide detailed scientific information in Kurdish Sorani about: {message.text}
+
+        Include:
+        1. Scientific name and composition
+        2. Therapeutic effects
+        3. Side effects
+        4. Special pharmacological properties
+        """)
+        bot.reply_to(message, f"🔍 زانیاری:\n\n{response.text}")
+    except Exception as e:
+        bot.reply_to(message, f"هەڵە: نەتوانم زانیاری بدۆزمەوە. تکایە ناوەکە ڕاست بنووسە.")
 
 def run_bot():
     """Run bot with auto-recovery"""
@@ -122,5 +149,5 @@ def run_bot():
             time.sleep(30)
 
 if __name__ == '__main__':
-    print("Starting medicine information bot...")
+    print("Starting advanced medicine bot...")
     run_bot()
