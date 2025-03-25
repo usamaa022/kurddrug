@@ -1,46 +1,50 @@
 import os
 import time
+import threading
 import telebot
 from PIL import Image
 import google.generativeai as genai
 from requests.exceptions import ConnectionError, ReadTimeout
-from telebot.apihelper import ApiException
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 
 # Configure API keys from environment variables
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '7322174132:AAF2xMjQxZ5P90BnTvR7PODP1H02uXQwCP0')
 GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'AIzaSyAf6pEnDG9xuJRyaSjbNzetmG2Qn2q2uYE')
 
-# Initialize Telegram Bot with better timeout settings
+# Initialize Telegram Bot with optimized settings
 bot = telebot.TeleBot(
     TELEGRAM_BOT_TOKEN,
-    threaded=False,  # Reduces connection issues
-    num_threads=1,  # Better for serverless environments
-    skip_pending=True  # Skip old messages on restart
+    threaded=False,
+    num_threads=1,
+    skip_pending=True
 )
 
-# Configure Google Generative AI with retry logic
-genai.configure(
-    api_key=GOOGLE_API_KEY,
-    transport='rest',  # More stable than default
-    client_options={
-        'api_endpoint': 'https://generativelanguage.googleapis.com/v1beta'
-    }
-)
-
-# Initialize the generative model with safety settings
+# Configure Google Generative AI
+genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel(
     'gemini-1.5-flash',
     generation_config={
         'temperature': 0.4,
         'max_output_tokens': 2000
-    },
-    safety_settings=[
-        {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_HATE_SPEECH", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_SEXUALLY_EXPLICIT", "threshold": "BLOCK_NONE"},
-        {"category": "HARM_CATEGORY_DANGEROUS_CONTENT", "threshold": "BLOCK_NONE"}
-    ]
+    }
 )
+
+class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
+    """Handle requests in a separate thread"""
+
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b'OK')
+
+def start_health_server():
+    """Start health check server on port 8000"""
+    server = ThreadedHTTPServer(('0.0.0.0', 8000), HealthHandler)
+    print("Health check server running on port 8000")
+    server.serve_forever()
 
 def analyze_medicine_image(image):
     """Analyze medicine packaging with enhanced error handling"""
@@ -60,7 +64,6 @@ def analyze_medicine_image(image):
         "ناتوانم دەرمانەکە ناسایەوە. تکایە وێنەیەکی باشتر و ڕوونتر بنێرە، بە تایبەتی ناوی دەرمانەکە و زانیارییەکانی تر."
         """
         
-        # Generate response with timeout
         response = model.generate_content(
             [prompt, image],
             request_options={'timeout': 10}
@@ -89,11 +92,9 @@ def send_welcome(message):
 def handle_medicine_photo(message):
     temp_image_path = 'medicine_image.jpg'
     try:
-        # Download with timeout
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path, timeout=15)
         
-        # Save and process
         with open(temp_image_path, 'wb') as f:
             f.write(downloaded_file)
         
@@ -117,10 +118,9 @@ def run_bot():
             bot.polling(
                 none_stop=True,
                 timeout=30,
-                long_polling_timeout=20,
-                restart_on_change=True
+                long_polling_timeout=20
             )
-        except (ConnectionError, ReadTimeout, ApiException) as e:
+        except (ConnectionError, ReadTimeout) as e:
             print(f"Connection error: {e}. Retrying in 10s...")
             time.sleep(10)
         except Exception as e:
@@ -128,5 +128,10 @@ def run_bot():
             time.sleep(30)
 
 if __name__ == '__main__':
-    print("Bot starting with auto-recovery...")
+    # Start health check server in background
+    health_thread = threading.Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    
+    # Start the bot
+    print("Bot starting with health checks...")
     run_bot()
