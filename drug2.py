@@ -25,15 +25,12 @@ genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel(
     'gemini-1.5-pro',
     generation_config={
-        'temperature': 0.3,
-        'top_p': 0.95,
-        'top_k': 40,
-        'max_output_tokens': 3000
+        'temperature': 0.2,  # More precise responses
+        'max_output_tokens': 4000
     }
 )
 
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
-    """Handle requests in separate thread"""
     daemon_threads = True
 
 class HealthHandler(BaseHTTPRequestHandler):
@@ -44,7 +41,6 @@ class HealthHandler(BaseHTTPRequestHandler):
         self.wfile.write(b'OK')
 
 def start_health_server():
-    """Start health check server on port 8000"""
     server = ThreadedHTTPServer(('0.0.0.0', 8000), HealthHandler)
     print("Health check server running on port 8000")
     server.serve_forever()
@@ -63,29 +59,66 @@ def enhance_image_quality(img):
         return img
 
 def analyze_medicine_image(image):
-    """Advanced medicine analysis with structured output"""
+    """Comprehensive medicine analysis in Kurdish Sorani"""
     try:
-        prompt = """..."""  # Your existing prompt here
+        prompt = """
+        تەنیا بە کوردی سۆرانی وەڵام بدەرەوە. زانیارییەکان پێویستە پێڕستی خوارەوە لەخۆبگرێت:
+
+        🏷 ناوی دەرمان: 
+        - ناوی بازرگانی: [ناو]
+        - ناوی جێگرەوە: [ناو]
+
+        🩺 بۆ چ دەرمانێکە:
+        - [لیستی ئەو نەخۆشییانەی بۆی بەکاردێت]
+        - [جۆری ئازارەکانی چارەسەر دەکات]
+
+        💊 چۆنیەتی بەکارهێنان:
+        - [ئەو پێناسانەی لەسەر پاکەتەکەیە]
+        - [کاتی بەکارهێنان (بەیانی/ئێواران)]
+
+        ⚠️ مەترسی و کاریگەرییە نەخوازراوەکان:
+        - [کاریگەرییە لاوەکییەکان]
+        - [پێشترازیەکان]
+
+        🤰 ئایا بۆ خانمە دووگیانەکان باشە؟
+        - [بەڵێ/نەخێر] + [هۆکار]
+
+        👶 ئایا بۆ منداڵان باشە؟
+        - [تەمەنی گونجاو] + [ئامۆژگاری تایبەت]
+
+        💰 نرخ: [ئەگەر دیاربوو]
+
+        📅 ماوەی بەکارهێنان: [ماوەی گونجاو]
+
+        🧊 چۆنیەتی پاراستن: [ئەگەر دیاربوو]
+
+        ئەگەر ناتوانیت دەرمانەکە بشناسیتەوە:
+        "نەتوانم دەرمانەکە بشناسمەوە. تکایە وێنەیەکی ڕوونتر بنێرە بە تایبەتی بەشی ناو و زانیارییەکانی پاکەتەکە."
+        """
+        
         enhanced_img = enhance_image_quality(image)
         
-        for attempt in range(3):
-            try:
-                response = model.generate_content(
-                    [prompt, enhanced_img],
-                    request_options={'timeout': 15}
-                )
-                return response.text
-            except Exception as e:
-                if attempt == 2:
-                    raise
-                time.sleep(2)
-                
+        response = model.generate_content(
+            [prompt, enhanced_img],
+            request_options={'timeout': 20}
+        )
+        return response.text
+    
     except Exception as e:
-        return f"هەڵەیەک ڕوویدا: {str(e)}\nتکایە دووبارەی بکەرەوە."
+        return f"هەڵەیەک ڕوویدا لە خوێندنەوەی وێنەکە: {str(e)}\nتکایە دووبارەی بکەرەوە."
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    welcome_text = """..."""  # Your existing welcome message
+    welcome_text = """
+    بەخێربێیت بۆ بۆتی زانستگەی دەرمانی 👨‍⚕️💊
+
+ئەم بۆتە یارمەتیت دەدات لە:
+- ناسینەوەی دەرمانەکان
+- زانینی بەکارهێنان و کاریگەرییەکانی
+- زانینی مەترسی و ئامۆژگاری تایبەت
+
+تکایە وێنەیەکی ڕوون لە پاکەتی دەرمانەکە بنێرە، بە تایبەتی بەشی ناو و زانیارییەکانی.
+"""
     bot.reply_to(message, welcome_text)
 
 @bot.message_handler(content_types=['photo'])
@@ -100,11 +133,17 @@ def handle_medicine_photo(message):
         
         with Image.open(temp_image_path) as img:
             description = analyze_medicine_image(img)
-            response = f"🔍 نەتیجەی پشکنین:\n\n{description}\n\n⚠️ هەمیشە ڕاوێژ لە پزیشک بکە."
+            response = f"""
+🔍 زانیاری دەرمانەکە:
+
+{description}
+
+⚠️ ئامۆژگاری: هەمیشە پێش بەکارهێنانی دەرمان، ڕاوێژ لە پزیشک یان ئەندازیاری دەرمانسازی بکە.
+"""
             bot.reply_to(message, response)
     
     except Exception as e:
-        bot.reply_to(message, f"هەڵە: {str(e)[:200]}\nتکایە وێنەیەکی ڕوونتر بنێرە.")
+        bot.reply_to(message, f"هەڵە: {str(e)[:200]}\nتکایە دووبارەی بکەرەوە.")
     
     finally:
         if os.path.exists(temp_image_path):
@@ -131,5 +170,5 @@ def run_bot():
 if __name__ == '__main__':
     health_thread = threading.Thread(target=start_health_server, daemon=True)
     health_thread.start()
-    print("Bot starting with enhanced drug recognition...")
+    print("Bot starting with medical analysis...")
     run_bot()
