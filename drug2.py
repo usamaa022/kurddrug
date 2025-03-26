@@ -8,9 +8,12 @@ from requests.exceptions import ConnectionError, ReadTimeout
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 
-# Configure API keys
-TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN', '7322174132:AAF2xMjQxZ5P90BnTvR7PODP1H02uXQwCP0')
-GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', 'AIzaSyAf6pEnDG9xuJRyaSjbNzetmG2Qn2q2uYE')
+# Configure API keys from environment variables (SECURE)
+TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY')
+
+if not TELEGRAM_BOT_TOKEN or not GOOGLE_API_KEY:
+    raise ValueError("Missing required environment variables: TELEGRAM_BOT_TOKEN and GOOGLE_API_KEY")
 
 # Initialize Telegram Bot
 bot = telebot.TeleBot(
@@ -36,13 +39,20 @@ class HealthCheckServer(ThreadingMixIn, HTTPServer):
 
 class HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
+        """Handle health check requests from UptimeRobot"""
         self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
         self.end_headers()
-        self.wfile.write(b'OK')
+        self.wfile.write(b'OK - Medicine Bot is running')
+        
+    def log_message(self, format, *args):
+        """Disable logging to keep console clean"""
+        return
 
 def start_health_server():
-    """Start health check server in background"""
-    server = HealthCheckServer(('0.0.0.0', 8000), HealthHandler)
+    """Start health check server on port 8080 (Koyeb's default)"""
+    server = HealthCheckServer(('0.0.0.0', 8080), HealthHandler)
+    print("Health check server running on port 8080")
     server.serve_forever()
 
 def enhance_image_quality(img):
